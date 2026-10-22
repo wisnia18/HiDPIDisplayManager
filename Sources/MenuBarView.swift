@@ -53,8 +53,8 @@ public struct MenuBarView: View {
             
             // Main Content Area
             if let screen = activeScreen {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 12) {
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(spacing: 10) {
                         
                         // 1. Display Overview & Active Status
                         DisplayOverviewCard(screen: screen)
@@ -74,20 +74,21 @@ public struct MenuBarView: View {
                         // 6. Complete All Resolutions Card (Scrollable, Filterable, ALL available modes)
                         AllResolutionsCard(screen: screen)
                     }
-                    .padding(14)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                 }
-                .frame(height: 520)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 NoDisplaysPlaceholder()
-                    .frame(height: 240)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             
             Divider().opacity(0.4)
             
-            // Footer
+            // Pinned Footer (Always fully visible at the bottom)
             AppFooterView()
         }
-        .frame(width: 380, height: 630)
+        .frame(width: 410, height: 640)
         .background(VisualEffectView(material: .popover, blendingMode: .behindWindow))
         .onAppear {
             if selectedDisplayID == nil {
@@ -405,7 +406,9 @@ private struct RefreshRateCard: View {
                                 manager.setRefreshRate(rate, for: screen)
                             } label: {
                                 Text("\(rate) Hz")
-                                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                                    .font(.system(size: 10.5, weight: isSelected ? .bold : .medium))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 6)
                                     .background(
@@ -727,12 +730,14 @@ private struct AllResolutionsCard: View {
                                         Text(mode.resolutionTitle)
                                             .font(.system(size: 11, weight: isCurrent ? .semibold : .regular))
                                             .foregroundColor(isCurrent ? .primary : .primary.opacity(0.85))
+                                            .lineLimit(1)
                                         
                                         Spacer()
                                         
                                         Text("\(mode.pixelWidth)×\(mode.pixelHeight)")
                                             .font(.system(size: 9, design: .monospaced))
                                             .foregroundColor(.secondary)
+                                            .lineLimit(1)
                                         
                                         if mode.isHiDPI {
                                             Text("Retina")
@@ -746,7 +751,8 @@ private struct AllResolutionsCard: View {
                                         Text("\(mode.roundedRefreshRate) Hz")
                                             .font(.system(size: 9, weight: isCurrent ? .bold : .regular))
                                             .foregroundColor(.secondary)
-                                            .frame(width: 42, alignment: .trailing)
+                                            .frame(width: 44, alignment: .trailing)
+                                            .lineLimit(1)
                                     }
                                     .padding(.vertical, 4)
                                     .padding(.horizontal, 6)
@@ -759,7 +765,7 @@ private struct AllResolutionsCard: View {
                             }
                         }
                     }
-                    .frame(maxHeight: 220)
+                    .frame(maxHeight: 250)
                 }
             } label: {
                 HStack {
