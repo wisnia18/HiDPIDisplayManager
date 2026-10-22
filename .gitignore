@@ -1,0 +1,26 @@
+# macOS System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Build Artifacts
+build/
+DerivedData/
+*.app
+*.dSYM/
+
+# Xcode User Data
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserdatad
+*.xcuserstate
+
+# Temporary files
+*.swp
+*.bak
+*~
+*.log
+/tmp/
