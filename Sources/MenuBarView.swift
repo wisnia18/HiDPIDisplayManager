@@ -30,19 +30,19 @@ public struct MenuBarView: View {
     
     public var body: some View {
         VStack(spacing: 0) {
-            // Header
+            // Header with Display Module Switch
             AppHeaderView()
             
             Divider().opacity(0.4)
             
-            // Failsafe Rollback Warning (if active)
-            if let rollback = manager.activeRollback {
+            // Failsafe Rollback Warning (if active and display management is enabled)
+            if manager.isDisplayManagementEnabled, let rollback = manager.activeRollback {
                 SafetyRollbackBanner(rollback: rollback, countdown: manager.rollbackCountdown)
                 Divider().opacity(0.4)
             }
             
-            // Display Selector Tabs (when multiple screens attached)
-            if manager.displays.count > 1 {
+            // Display Selector Tabs (when multiple screens attached and display management is enabled)
+            if manager.isDisplayManagementEnabled && manager.displays.count > 1 {
                 DisplaySelectorBar(
                     displays: manager.displays,
                     selectedID: activeScreen?.id ?? 0,
@@ -52,36 +52,41 @@ public struct MenuBarView: View {
             }
             
             // Main Content Area
-            if let screen = activeScreen {
-                ScrollView(.vertical, showsIndicators: true) {
-                    VStack(spacing: 10) {
-                        
-                        // 1. Display Overview & Active Status
-                        DisplayOverviewCard(screen: screen)
-                        
-                        // 2. Fractional HiDPI Scaling (1080p, 1152p, 1440p, 1692p, 4K)
-                        UIScalingCard(screen: screen)
-                        
-                        // 3. Dedicated Refresh Rate Card (160 Hz, 144 Hz, 120 Hz, 100 Hz, 60 Hz...)
-                        RefreshRateCard(screen: screen)
-                        
-                        // 4. Hardware Display Brightness Slider (Control Center Style)
-                        BrightnessCard(screen: screen)
-                        
-                        // 5. Audio Output & 5% Keyboard Volume Controller
-                        AudioCard()
-                        
-                        // 6. Complete All Resolutions Card (Scrollable, Filterable, ALL available modes)
-                        AllResolutionsCard(screen: screen)
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 10) {
+                    
+                    if manager.isDisplayManagementEnabled {
+                        // Display Management Controls
+                        if let screen = activeScreen {
+                            // 1. Display Overview & Active Status
+                            DisplayOverviewCard(screen: screen)
+                            
+                            // 2. Fractional HiDPI Scaling (1080p, 1152p, 1440p, 1692p, 4K)
+                            UIScalingCard(screen: screen)
+                            
+                            // 3. Dedicated Refresh Rate Card (160 Hz, 144 Hz, 120 Hz, 100 Hz, 60 Hz...)
+                            RefreshRateCard(screen: screen)
+                            
+                            // 4. Hardware Display Brightness Slider (Control Center Style)
+                            BrightnessCard(screen: screen)
+                            
+                            // 5. Complete All Resolutions Card (Scrollable, Filterable, ALL available modes)
+                            AllResolutionsCard(screen: screen)
+                        } else {
+                            NoDisplaysPlaceholder()
+                        }
+                    } else {
+                        // Deactivated Display Management Banner
+                        DisplayManagementDisabledCard()
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    
+                    // 6. Audio Output & 5% Keyboard Volume Controller (Always available)
+                    AudioCard()
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                NoDisplaysPlaceholder()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             
             Divider().opacity(0.4)
             
@@ -106,38 +111,104 @@ private struct AppHeaderView: View {
     
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "display")
+            Image(systemName: manager.isDisplayManagementEnabled ? "display" : "display.slash")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.accentColor)
+                .foregroundColor(manager.isDisplayManagementEnabled ? .accentColor : .secondary)
             
             VStack(alignment: .leading, spacing: 1) {
                 Text("Displays & Sound")
                     .font(.system(size: 13, weight: .semibold))
-                Text("HiDPI Scaling & Hardware DDC")
+                Text(manager.isDisplayManagementEnabled ? "Moduł ekranów: Włączony" : "Moduł ekranów: Wyłączony")
                     .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(manager.isDisplayManagementEnabled ? .secondary : .orange)
             }
             
             Spacer()
             
-            Button {
-                manager.refreshDisplays()
-                audioManager.refreshDevices()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .frame(width: 24, height: 24)
-                    .background(
-                        Circle()
-                            .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6))
-                    )
+            // Master toggle for Display Management
+            Toggle("", isOn: $manager.isDisplayManagementEnabled)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .help(manager.isDisplayManagementEnabled ? "Wyłącz moduł ekranów (brak jakiejkolwiek ingerencji w monitor)" : "Włącz moduł ekranów")
+            
+            if manager.isDisplayManagementEnabled {
+                Button {
+                    manager.refreshDisplays()
+                    audioManager.refreshDevices()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            Circle()
+                                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6))
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Odśwież ekrany i urządzenia audio")
             }
-            .buttonStyle(.plain)
-            .help("Odśwież ekrany i urządzenia audio")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+}
+
+// MARK: - Deactivated Display Management Banner Card
+
+private struct DisplayManagementDisabledCard: View {
+    @ObservedObject private var manager = DisplayManager.shared
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.orange.opacity(0.12))
+                        .frame(width: 40, height: 40)
+                    
+                    Image(systemName: "display.slash")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.orange)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Moduł ekranów jest wyłączony")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.primary)
+                    
+                    Text("Aplikacja została całkowicie odłączona od monitorów. Nie wysyła żadnych sygnałów DDC/I2C, nie rekonfiguruje obrazu, nie zmienia rozdzielczości ani częstotliwości. Monitor jest w 100% kontrolowany bezpośrednio przez system macOS.")
+                        .font(.system(size: 10.5))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                
+                Spacer()
+            }
+            
+            HStack {
+                Text("Dźwięk i sterowanie głośnością działają poniżej.")
+                    .font(.system(size: 9.5))
+                    .foregroundColor(.secondary)
+                
+                Spacer()
+                
+                Button("Włącz moduł ekranów") {
+                    manager.isDisplayManagementEnabled = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.orange.opacity(0.2), lineWidth: 1)
+        )
     }
 }
 

@@ -65,48 +65,97 @@ public final class DisplayManager: ObservableObject {
     private var rollbackTimer: AnyCancellable?
     private var virtualDisplayInstance: CGVirtualDisplay?
     private var isReconfiguring = false
+    private var isCallbackRegistered = false
+    private var reconfigWorkItem: DispatchWorkItem?
+    
+    /// Global toggle to completely deactivate/enable display management features
+    @Published public var isDisplayManagementEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isDisplayManagementEnabled, forKey: "DisplayManagementEnabled")
+            if isDisplayManagementEnabled {
+                registerReconfigurationCallback()
+                refreshDisplays()
+                logger.info("Display management activated by user.")
+            } else {
+                unregisterReconfigurationCallback()
+                reconfigWorkItem?.cancel()
+                reconfigWorkItem = nil
+                rollbackTimer?.cancel()
+                rollbackTimer = nil
+                activeRollback = nil
+                displays = []
+                logger.info("Display management completely deactivated by user.")
+            }
+        }
+    }
     
     // MARK: - Initialization & Hardware Hook
     
     private init() {
-        registerReconfigurationCallback()
-        refreshDisplays()
+        let enabled = UserDefaults.standard.object(forKey: "DisplayManagementEnabled") as? Bool ?? true
+        self.isDisplayManagementEnabled = enabled
+        if enabled {
+            registerReconfigurationCallback()
+            refreshDisplays()
+        }
     }
     
-    deinit {
-        // Unregister C callback on teardown
-        CGDisplayRemoveReconfigurationCallback(displayReconfigurationCallback, Unmanaged.passUnretained(self).toOpaque())
+    isolated deinit {
+        unregisterReconfigurationCallback()
     }
     
     // MARK: - Hardware Event Monitoring
     
     private func registerReconfigurationCallback() {
+        guard !isCallbackRegistered else { return }
         let context = Unmanaged.passUnretained(self).toOpaque()
         let result = CGDisplayRegisterReconfigurationCallback(displayReconfigurationCallback, context)
         if result != .success {
             logger.error("Failed to register CGDisplayRegisterReconfigurationCallback: \(result.rawValue)")
         } else {
+            isCallbackRegistered = true
             logger.info("Successfully registered display hardware reconfiguration callback.")
         }
     }
     
+    private func unregisterReconfigurationCallback() {
+        guard isCallbackRegistered else { return }
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        CGDisplayRemoveReconfigurationCallback(displayReconfigurationCallback, context)
+        isCallbackRegistered = false
+        logger.info("Successfully unregistered display hardware reconfiguration callback.")
+    }
+    
     /// Called by the C callback when macOS detects monitor hotplug, wake, sleep, or mode shift.
     fileprivate func handleDisplayHardwareChange(display: CGDirectDisplayID, flags: CGDisplayChangeSummaryFlags) {
+        guard isDisplayManagementEnabled else { return }
+        
         // Ignore the begin configuration notification; react when configuration completes
         if flags.contains(.beginConfigurationFlag) {
             return
         }
         
-        Task { @MainActor in
-            self.logger.info("Display hardware change detected (flags: \(flags.rawValue)). Refreshing display list...")
-            self.refreshDisplays()
+        // Debounce by 1.5s to prevent cascading reconfiguration events and monitor blinking
+        reconfigWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self = self, self.isDisplayManagementEnabled else { return }
+            Task { @MainActor in
+                self.logger.info("Debounced display hardware change (flags: \(flags.rawValue)). Refreshing display list...")
+                self.refreshDisplays()
+            }
         }
+        reconfigWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: item)
     }
     
     // MARK: - Display Enumeration
     
     /// Refreshes all connected displays, builds deep mode lists, and restores cached brightness.
     public func refreshDisplays() {
+        guard isDisplayManagementEnabled else {
+            self.displays = []
+            return
+        }
         var activeDisplayCount: UInt32 = 0
         var result = CGGetActiveDisplayList(0, nil, &activeDisplayCount)
         guard result == .success, activeDisplayCount > 0 else {
@@ -321,7 +370,7 @@ public final class DisplayManager: ObservableObject {
     
     /// Applies a requested display mode and initiates a 15-second safety confirmation timer.
     public func setDisplayMode(mode: DisplayModeItem, for screen: DisplayScreen) {
-        guard !isReconfiguring else { return }
+        guard isDisplayManagementEnabled, !isReconfiguring else { return }
         
         let previousCGMode = CGDisplayCopyDisplayMode(screen.id)
         var previousCGSIndex: Int32 = -1
@@ -351,6 +400,7 @@ public final class DisplayManager: ObservableObject {
     
     /// Switches refresh rate for current resolution while preserving pixel dimensions and HiDPI state.
     public func setRefreshRate(_ targetRate: Int, for screen: DisplayScreen) {
+        guard isDisplayManagementEnabled else { return }
         guard let current = screen.currentMode else { return }
         
         // 1. Try finding mode with exact resolution + HiDPI flag matching the target rate
@@ -519,6 +569,7 @@ public final class DisplayManager: ObservableObject {
     /// - For external monitors: physical hardware backlight lamps via DDC/CI (VCP 0x10) like MonitorControl.
     /// - For built-in Retina displays: native Apple DisplayServices backlight control.
     public func setBrightness(_ value: Float, for screen: DisplayScreen) {
+        guard isDisplayManagementEnabled else { return }
         let clamped = max(0.0, min(1.0, value))
         
         if screen.isBuiltin {

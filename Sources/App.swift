@@ -41,8 +41,9 @@ struct HiDPIDisplayManagerApp: App {
                 Image(systemName: "display")
                     .symbolRenderingMode(.hierarchical)
                 
-                // Show a subtle badge dot if an active monitor is rendering HiDPI @2x
-                if let active = manager.displays.first(where: { !$0.isBuiltin })?.currentMode ?? manager.displays.first?.currentMode,
+                // Show a subtle badge dot if display management is active and an active monitor is rendering HiDPI @2x
+                if manager.isDisplayManagementEnabled,
+                   let active = manager.displays.first(where: { !$0.isBuiltin })?.currentMode ?? manager.displays.first?.currentMode,
                    active.isHiDPI {
                     Image(systemName: "circle.fill")
                         .font(.system(size: 5))
