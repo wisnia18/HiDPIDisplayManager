@@ -380,10 +380,23 @@ public struct DisplayScreen: Identifiable, Hashable, Sendable {
     /// Returns unique refresh rates available for the currently selected resolution.
     public var availableRefreshRatesForCurrentResolution: [Int] {
         guard let current = currentMode else { return [60] }
-        let rates = availableModes
+        let matching = availableModes
             .filter { $0.logicalWidth == current.logicalWidth && $0.logicalHeight == current.logicalHeight && $0.isHiDPI == current.isHiDPI }
             .map { $0.roundedRefreshRate }
-        let set = Set(rates)
+        let set = Set(matching)
+        if !set.isEmpty {
+            return set.sorted(by: >)
+        }
+        // Fallback: any mode with same logical dimensions regardless of HiDPI flag
+        let fallback = availableModes
+            .filter { $0.logicalWidth == current.logicalWidth && $0.logicalHeight == current.logicalHeight }
+            .map { $0.roundedRefreshRate }
+        return Set(fallback).sorted(by: >)
+    }
+    
+    /// All unique refresh rates supported by the physical display hardware across all modes.
+    public var allSupportedRefreshRates: [Int] {
+        let set = Set(availableModes.map { $0.roundedRefreshRate })
         return set.sorted(by: >)
     }
     

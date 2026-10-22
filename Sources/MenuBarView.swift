@@ -4,6 +4,7 @@
 //
 //  Apple Design System: Pixel-perfect, minimalist macOS Control Center aesthetics.
 //  Strict 3-Color Palette: System Monochrome, Apple Accent, and Muted Amber.
+//  Full resolution unlocking & multi-refresh-rate management (up to 160Hz / 144Hz).
 //
 
 import SwiftUI
@@ -32,8 +33,7 @@ public struct MenuBarView: View {
             // Header
             AppHeaderView()
             
-            Divider()
-                .opacity(0.4)
+            Divider().opacity(0.4)
             
             // Failsafe Rollback Warning (if active)
             if let rollback = manager.activeRollback {
@@ -56,20 +56,23 @@ public struct MenuBarView: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 12) {
                         
-                        // 1. Display Overview & Status
+                        // 1. Display Overview & Active Status
                         DisplayOverviewCard(screen: screen)
                         
-                        // 2. Fractional HiDPI Scaling (Apple-style segmented step bar)
+                        // 2. Fractional HiDPI Scaling (1080p, 1152p, 1440p, 1692p, 4K)
                         UIScalingCard(screen: screen)
                         
-                        // 3. Hardware Display Brightness Slider (Control Center Style)
+                        // 3. Dedicated Refresh Rate Card (160 Hz, 144 Hz, 120 Hz, 100 Hz, 60 Hz...)
+                        RefreshRateCard(screen: screen)
+                        
+                        // 4. Hardware Display Brightness Slider (Control Center Style)
                         BrightnessCard(screen: screen)
                         
-                        // 4. Audio Output & 5% Keyboard Volume Controller
+                        // 5. Audio Output & 5% Keyboard Volume Controller
                         AudioCard()
                         
-                        // 5. Refresh Rate & Advanced Modes
-                        AdvancedDisplayCard(screen: screen)
+                        // 6. Complete All Resolutions Card (Scrollable, Filterable, ALL available modes)
+                        AllResolutionsCard(screen: screen)
                     }
                     .padding(14)
                 }
@@ -228,8 +231,8 @@ private struct DisplayOverviewCard: View {
                                 .foregroundColor(.secondary)
                             
                             Text("\(mode.roundedRefreshRate) Hz")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.accentColor)
                             
                             if mode.isHiDPI {
                                 Text("Retina @2x")
@@ -240,6 +243,10 @@ private struct DisplayOverviewCard: View {
                                     .foregroundColor(.accentColor)
                             }
                         }
+                        
+                        Text("Rozdzielczość fizyczna: \(mode.pixelWidth) × \(mode.pixelHeight) px")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.secondary)
                     }
                 }
                 
@@ -266,20 +273,32 @@ private struct UIScalingStep: Identifiable {
     let targetHeight: Int
     let label: String
     let sublabel: String
-    let isRecommended: Bool
 }
 
 private struct UIScalingCard: View {
     @ObservedObject private var manager = DisplayManager.shared
     let screen: DisplayScreen
     
-    private let steps: [UIScalingStep] = [
-        UIScalingStep(id: 1, targetWidth: 1920, targetHeight: 1080, label: "1080p", sublabel: "Większy tekst", isRecommended: false),
-        UIScalingStep(id: 2, targetWidth: 2048, targetHeight: 1152, label: "1152p", sublabel: "187%", isRecommended: false),
-        UIScalingStep(id: 3, targetWidth: 2560, targetHeight: 1440, label: "1440p", sublabel: "Domyślna", isRecommended: true),
-        UIScalingStep(id: 4, targetWidth: 3008, targetHeight: 1692, label: "1692p", sublabel: "127%", isRecommended: false),
-        UIScalingStep(id: 5, targetWidth: 3840, targetHeight: 2160, label: "4K", sublabel: "Więcej miejsca", isRecommended: false)
-    ]
+    // Custom steps adapted based on display type (Built-in Retina vs 16:9 External 4K)
+    private var steps: [UIScalingStep] {
+        if screen.isBuiltin {
+            return [
+                UIScalingStep(id: 1, targetWidth: 1024, targetHeight: 665, label: "1024p", sublabel: "Większy"),
+                UIScalingStep(id: 2, targetWidth: 1147, targetHeight: 745, label: "1147p", sublabel: "Duży"),
+                UIScalingStep(id: 3, targetWidth: 1352, targetHeight: 878, label: "1352p", sublabel: "Średni"),
+                UIScalingStep(id: 4, targetWidth: 1512, targetHeight: 982, label: "1512p", sublabel: "Domyślna"),
+                UIScalingStep(id: 5, targetWidth: 1800, targetHeight: 1169, label: "1800p", sublabel: "Więcej")
+            ]
+        } else {
+            return [
+                UIScalingStep(id: 1, targetWidth: 1920, targetHeight: 1080, label: "1080p", sublabel: "Większy"),
+                UIScalingStep(id: 2, targetWidth: 2048, targetHeight: 1152, label: "1152p", sublabel: "187%"),
+                UIScalingStep(id: 3, targetWidth: 2560, targetHeight: 1440, label: "1440p", sublabel: "Domyślna"),
+                UIScalingStep(id: 4, targetWidth: 3008, targetHeight: 1692, label: "1692p", sublabel: "127%"),
+                UIScalingStep(id: 5, targetWidth: 3840, targetHeight: 2160, label: "4K", sublabel: "100%")
+            ]
+        }
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -340,17 +359,106 @@ private struct UIScalingCard: View {
     
     private func applyScaleStep(_ step: UIScalingStep) {
         let isHiDPI = (step.targetWidth < 3840)
-        if let mode = screen.availableModes.first(where: {
-            $0.logicalWidth == step.targetWidth &&
-            $0.logicalHeight == step.targetHeight &&
-            ($0.isHiDPI == isHiDPI || !isHiDPI)
-        }) {
-            manager.setDisplayMode(mode: mode, for: screen)
-        } else if let fallback = screen.availableModes.first(where: {
-            $0.logicalWidth == step.targetWidth && $0.logicalHeight == step.targetHeight
-        }) {
-            manager.setDisplayMode(mode: fallback, for: screen)
+        let currentDesiredRate = screen.currentMode?.roundedRefreshRate ?? 144
+        if let best = manager.findBestMode(
+            targetWidth: step.targetWidth,
+            targetHeight: step.targetHeight,
+            preferHiDPI: isHiDPI,
+            desiredRate: currentDesiredRate,
+            for: screen
+        ) {
+            manager.setDisplayMode(mode: best, for: screen)
         }
+    }
+}
+
+// MARK: - Dedicated Refresh Rate Card (Prominent & Complete)
+
+private struct RefreshRateCard: View {
+    @ObservedObject private var manager = DisplayManager.shared
+    let screen: DisplayScreen
+    
+    var body: some View {
+        let rates = screen.availableRefreshRatesForCurrentResolution
+        let currentRate = screen.currentMode?.roundedRefreshRate ?? 60
+        
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Częstotliwość odświeżania")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.secondary)
+                
+                Spacer()
+                
+                Text("\(currentRate) Hz")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(.accentColor)
+            }
+            
+            if rates.count > 1 {
+                // If 5 or fewer rates, show sleek horizontal pill buttons
+                if rates.count <= 6 {
+                    HStack(spacing: 4) {
+                        ForEach(rates, id: \.self) { rate in
+                            let isSelected = (rate == currentRate)
+                            Button {
+                                manager.setRefreshRate(rate, for: screen)
+                            } label: {
+                                Text("\(rate) Hz")
+                                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(isSelected ? Color.accentColor : Color(nsColor: .controlBackgroundColor).opacity(0.6))
+                                    )
+                                    .foregroundColor(isSelected ? .white : .primary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                } else {
+                    // For panels with many rates (e.g. 160, 144, 120, 100, 75, 60, 50, 30...), segmented scroll / picker
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            ForEach(rates, id: \.self) { rate in
+                                let isSelected = (rate == currentRate)
+                                Button {
+                                    manager.setRefreshRate(rate, for: screen)
+                                } label: {
+                                    Text("\(rate) Hz")
+                                        .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                                .fill(isSelected ? Color.accentColor : Color(nsColor: .controlBackgroundColor).opacity(0.6))
+                                        )
+                                        .foregroundColor(isSelected ? .white : .primary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            } else {
+                HStack {
+                    Text("Rozdzielczość aktywna w trybie \(currentRate) Hz.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color(nsColor: .separatorColor).opacity(0.2), lineWidth: 1)
+        )
     }
 }
 
@@ -487,7 +595,7 @@ private struct AudioCard: View {
                     .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6))
             )
             
-            // Volume Slider (Control Center Style)
+            // Volume Slider (Control Center Style with 5% increments)
             HStack(spacing: 8) {
                 Button {
                     audioManager.toggleMute()
@@ -534,103 +642,132 @@ private struct AudioCard: View {
     }
 }
 
-// MARK: - Advanced Display Card (Refresh Rate & Modes)
+// MARK: - Complete All Resolutions Card (Scrollable, Unlocked, Filterable)
 
-private struct AdvancedDisplayCard: View {
+private struct AllResolutionsCard: View {
     @ObservedObject private var manager = DisplayManager.shared
     let screen: DisplayScreen
     @State private var isExpanded = false
+    @State private var filterMode: Int = 0 // 0: Wszystkie, 1: Tylko HiDPI, 2: Standard 1x
+    
+    // Group duplicates by logical resolution and HiDPI
+    private var uniqueGroupedModes: [DisplayModeItem] {
+        var seen = [String: DisplayModeItem]()
+        for mode in screen.availableModes {
+            let key = "\(mode.logicalWidth)x\(mode.logicalHeight)_\(mode.isHiDPI)"
+            if let existing = seen[key] {
+                // Keep the one with highest refresh rate
+                if mode.roundedRefreshRate > existing.roundedRefreshRate {
+                    seen[key] = mode
+                }
+            } else {
+                seen[key] = mode
+            }
+        }
+        return Array(seen.values).sorted { a, b in
+            if a.logicalWidth != b.logicalWidth {
+                return a.logicalWidth > b.logicalWidth
+            }
+            if a.logicalHeight != b.logicalHeight {
+                return a.logicalHeight > b.logicalHeight
+            }
+            return a.isHiDPI && !b.isHiDPI
+        }
+    }
+    
+    private var displayedModes: [DisplayModeItem] {
+        switch filterMode {
+        case 1:
+            return uniqueGroupedModes.filter { $0.isHiDPI }
+        case 2:
+            return uniqueGroupedModes.filter { !$0.isHiDPI }
+        default:
+            return uniqueGroupedModes
+        }
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Refresh Rate Row
-            let availableRates = screen.availableRefreshRatesForCurrentResolution
-            HStack {
-                Text("Częstotliwość odświeżania")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                if availableRates.count > 1 {
-                    Picker("", selection: Binding(
-                        get: { screen.currentMode?.roundedRefreshRate ?? 60 },
-                        set: { selectedRate in
-                            if let target = screen.availableModes.first(where: {
-                                $0.logicalWidth == screen.currentMode?.logicalWidth &&
-                                $0.logicalHeight == screen.currentMode?.logicalHeight &&
-                                $0.isHiDPI == screen.currentMode?.isHiDPI &&
-                                $0.roundedRefreshRate == selectedRate
-                            }) {
-                                manager.setDisplayMode(mode: target, for: screen)
-                            }
-                        }
-                    )) {
-                        ForEach(availableRates, id: \.self) { rate in
-                            Text("\(rate) Hz").tag(rate)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-                    .frame(width: 90)
-                } else if let mode = screen.currentMode {
-                    Text("\(mode.roundedRefreshRate) Hz")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.primary)
-                }
-            }
-            
-            // Collapsible All Modes
             DisclosureGroup(isExpanded: $isExpanded) {
-                VStack(spacing: 3) {
-                    let displayedModes = manager.showHiDPIOnly ? screen.hidpiModes : screen.availableModes
-                    ForEach(displayedModes.prefix(6)) { mode in
-                        let isCurrent = (screen.currentMode?.logicalWidth == mode.logicalWidth &&
-                                         screen.currentMode?.logicalHeight == mode.logicalHeight &&
-                                         screen.currentMode?.isHiDPI == mode.isHiDPI)
-                        
-                        Button {
-                            manager.setDisplayMode(mode: mode, for: screen)
-                        } label: {
-                            HStack {
-                                Image(systemName: isCurrent ? "checkmark" : "circle.fill")
-                                    .font(.system(size: isCurrent ? 10 : 3))
-                                    .foregroundColor(isCurrent ? .accentColor : .clear)
-                                    .frame(width: 14)
-                                
-                                Text(mode.resolutionTitle)
-                                    .font(.system(size: 11, weight: isCurrent ? .semibold : .regular))
-                                
-                                Spacer()
-                                
-                                if mode.isHiDPI {
-                                    Text("Retina")
-                                        .font(.system(size: 8, weight: .bold))
-                                        .padding(.horizontal, 4)
-                                        .padding(.vertical, 1)
-                                        .background(Capsule().fill(Color.accentColor.opacity(0.12)))
-                                        .foregroundColor(.accentColor)
-                                }
-                                
-                                Text("\(mode.roundedRefreshRate)Hz")
-                                    .font(.system(size: 9))
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.vertical, 3)
-                            .padding(.horizontal, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                    .fill(isCurrent ? Color.accentColor.opacity(0.08) : Color.clear)
-                            )
-                        }
-                        .buttonStyle(.plain)
+                VStack(spacing: 6) {
+                    // Filter bar
+                    HStack(spacing: 3) {
+                        filterButton(title: "Wszystkie (\(uniqueGroupedModes.count))", index: 0)
+                        filterButton(title: "Retina @2x (\(uniqueGroupedModes.filter { $0.isHiDPI }.count))", index: 1)
+                        filterButton(title: "Standard 1x (\(uniqueGroupedModes.filter { !$0.isHiDPI }.count))", index: 2)
                     }
+                    .padding(.top, 4)
+                    
+                    // Full scrollable list of all resolutions
+                    ScrollView(.vertical, showsIndicators: true) {
+                        LazyVStack(spacing: 2) {
+                            ForEach(displayedModes) { mode in
+                                let isCurrent = (screen.currentMode?.logicalWidth == mode.logicalWidth &&
+                                                 screen.currentMode?.logicalHeight == mode.logicalHeight &&
+                                                 screen.currentMode?.isHiDPI == mode.isHiDPI)
+                                
+                                Button {
+                                    let activeRate = screen.currentMode?.roundedRefreshRate ?? 144
+                                    if let best = manager.findBestMode(
+                                        targetWidth: mode.logicalWidth,
+                                        targetHeight: mode.logicalHeight,
+                                        preferHiDPI: mode.isHiDPI,
+                                        desiredRate: activeRate,
+                                        for: screen
+                                    ) {
+                                        manager.setDisplayMode(mode: best, for: screen)
+                                    }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: isCurrent ? "checkmark" : "circle.fill")
+                                            .font(.system(size: isCurrent ? 11 : 3, weight: .bold))
+                                            .foregroundColor(isCurrent ? .accentColor : .clear)
+                                            .frame(width: 14)
+                                        
+                                        Text(mode.resolutionTitle)
+                                            .font(.system(size: 11, weight: isCurrent ? .semibold : .regular))
+                                            .foregroundColor(isCurrent ? .primary : .primary.opacity(0.85))
+                                        
+                                        Spacer()
+                                        
+                                        Text("\(mode.pixelWidth)×\(mode.pixelHeight)")
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundColor(.secondary)
+                                        
+                                        if mode.isHiDPI {
+                                            Text("Retina")
+                                                .font(.system(size: 8, weight: .bold))
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+                                                .foregroundColor(.accentColor)
+                                        }
+                                        
+                                        Text("\(mode.roundedRefreshRate) Hz")
+                                            .font(.system(size: 9, weight: isCurrent ? .bold : .regular))
+                                            .foregroundColor(.secondary)
+                                            .frame(width: 42, alignment: .trailing)
+                                    }
+                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 6)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                            .fill(isCurrent ? Color.accentColor.opacity(0.1) : Color.clear)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 220)
                 }
-                .padding(.top, 4)
             } label: {
-                Text("Wszystkie rozdzielczości (\(screen.availableModes.count))")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.secondary)
+                HStack {
+                    Text("Pełna lista rozdzielczości (\(uniqueGroupedModes.count))")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.primary)
+                    Spacer()
+                }
             }
         }
         .padding(12)
@@ -642,6 +779,25 @@ private struct AdvancedDisplayCard: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color(nsColor: .separatorColor).opacity(0.2), lineWidth: 1)
         )
+    }
+    
+    @ViewBuilder
+    private func filterButton(title: String, index: Int) -> some View {
+        let isSelected = (filterMode == index)
+        Button {
+            filterMode = index
+        } label: {
+            Text(title)
+                .font(.system(size: 9, weight: isSelected ? .bold : .regular))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+                )
+                .foregroundColor(isSelected ? .accentColor : .secondary)
+        }
+        .buttonStyle(.plain)
     }
 }
 

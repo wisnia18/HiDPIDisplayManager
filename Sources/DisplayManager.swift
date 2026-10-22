@@ -341,12 +341,65 @@ public final class DisplayManager: ObservableObject {
             self.activeRollback = rollback
             self.rollbackCountdown = 15
             self.startRollbackTimer()
-            self.statusMessage = "Mode applied: \(mode.resolutionTitle). Confirm within 15 seconds."
+            self.statusMessage = "Mode applied: \(mode.resolutionTitle) @ \(mode.roundedRefreshRate)Hz."
             self.refreshDisplays()
         } else {
             self.statusMessage = "Failed to switch resolution for \(screen.name)."
             self.logger.error("Failed to switch display mode: \(mode.resolutionTitle)")
         }
+    }
+    
+    /// Switches refresh rate for current resolution while preserving pixel dimensions and HiDPI state.
+    public func setRefreshRate(_ targetRate: Int, for screen: DisplayScreen) {
+        guard let current = screen.currentMode else { return }
+        
+        // 1. Try finding mode with exact resolution + HiDPI flag matching the target rate
+        if let target = screen.availableModes.first(where: {
+            $0.logicalWidth == current.logicalWidth &&
+            $0.logicalHeight == current.logicalHeight &&
+            $0.isHiDPI == current.isHiDPI &&
+            $0.roundedRefreshRate == targetRate
+        }) {
+            setDisplayMode(mode: target, for: screen)
+            return
+        }
+        
+        // 2. Try finding mode with same logical dimensions matching the target rate
+        if let target = screen.availableModes.first(where: {
+            $0.logicalWidth == current.logicalWidth &&
+            $0.logicalHeight == current.logicalHeight &&
+            $0.roundedRefreshRate == targetRate
+        }) {
+            setDisplayMode(mode: target, for: screen)
+        }
+    }
+    
+    /// Finds the best mode matching target resolution while preserving the current refresh rate (e.g. 160Hz/144Hz).
+    public func findBestMode(
+        targetWidth: Int,
+        targetHeight: Int,
+        preferHiDPI: Bool,
+        desiredRate: Int,
+        for screen: DisplayScreen
+    ) -> DisplayModeItem? {
+        let candidates = screen.availableModes.filter {
+            $0.logicalWidth == targetWidth &&
+            $0.logicalHeight == targetHeight &&
+            ($0.isHiDPI == preferHiDPI || !preferHiDPI)
+        }
+        
+        // Priority 1: Exact refresh rate match
+        if let exact = candidates.first(where: { $0.roundedRefreshRate == desiredRate }) {
+            return exact
+        }
+        
+        // Priority 2: Highest available refresh rate for this resolution
+        if let highest = candidates.sorted(by: { $0.roundedRefreshRate > $1.roundedRefreshRate }).first {
+            return highest
+        }
+        
+        // Fallback: any mode with same dimensions
+        return screen.availableModes.first(where: { $0.logicalWidth == targetWidth && $0.logicalHeight == targetHeight })
     }
     
     /// Low-level configuration commit using CoreGraphics and CGS.
