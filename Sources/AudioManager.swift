@@ -205,12 +205,25 @@ public final class AudioManager: ObservableObject {
             }
         }
         
-        self.outputDevices = list
+        // De-duplicate devices sharing the same name (e.g. multi-channel HDMI endpoints),
+        // prioritizing the active default device.
+        var uniqueDevices: [AudioOutputDevice] = []
+        for dev in list {
+            if let existingIndex = uniqueDevices.firstIndex(where: { $0.name == dev.name }) {
+                if dev.isDefault {
+                    uniqueDevices[existingIndex] = dev
+                }
+            } else {
+                uniqueDevices.append(dev)
+            }
+        }
         
-        if alwaysControlMacBookSpeakers, let builtin = list.first(where: { $0.isBuiltin }) {
+        self.outputDevices = uniqueDevices
+        
+        if alwaysControlMacBookSpeakers, let builtin = uniqueDevices.first(where: { $0.isBuiltin }) {
             self.controlledDeviceID = builtin.id
-        } else if controlledDeviceID == 0 || !list.contains(where: { $0.id == controlledDeviceID }) {
-            self.controlledDeviceID = defaultID != 0 ? defaultID : (list.first?.id ?? 0)
+        } else if controlledDeviceID == 0 || !uniqueDevices.contains(where: { $0.id == controlledDeviceID }) {
+            self.controlledDeviceID = defaultID != 0 ? defaultID : (uniqueDevices.first?.id ?? 0)
         }
         
         updateVolumeState()

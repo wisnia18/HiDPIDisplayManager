@@ -669,6 +669,31 @@ private struct AudioCard: View {
                     .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6))
             )
             
+            // HDMI Fixed Digital Stream / DDC Notice
+            if audioManager.isControlledDeviceDDC && !audioManager.alwaysControlMacBookSpeakers {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sygnał audio HDMI jest zablokowany na 100% przez macOS.")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.primary)
+                        Text("Monitory często ignorują polecenia DDC. Jeśli dźwięk nie cichnie, włącz poniżej sterowanie głośnikami MacBooka.")
+                            .font(.system(size: 9.5))
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Spacer()
+                }
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6))
+                )
+            }
+            
             // Volume Slider (Control Center Style with 5% increments)
             HStack(spacing: 8) {
                 Button {
